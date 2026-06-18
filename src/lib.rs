@@ -11,7 +11,7 @@ use trie_rs::TrieBuilder;
 use crate::commands::{
     clear::{ClearCommand, clear_command},
     exit::{ExitCommand, exit_command},
-    help::{HelpCommand, help_command},
+    help::{HelpCommand, ListCommand, help_command, list_command},
 };
 
 pub use crate::console::{
@@ -60,14 +60,21 @@ fn have_commands(commands: MessageReader<ConsoleCommandEntered>) -> bool {
 fn init(config: Res<ConsoleConfiguration>, mut cache: ResMut<ConsoleCache>) {
     debug!("lib.rs:init");
     let mut trie_builder = TrieBuilder::new();
+    let mut completion_entries = Vec::new();
     for cmd in config.commands.keys() {
         trie_builder.push(cmd);
+        completion_entries.push((*cmd).to_string());
     }
 
     for completions in &config.arg_completions {
-        trie_builder.push(completions.join(" "));
+        let completion = completions.join(" ");
+        trie_builder.push(&completion);
+        completion_entries.push(completion);
     }
 
+    completion_entries.sort();
+    completion_entries.dedup();
+    cache.completion_entries = completion_entries;
     cache.commands_trie = Some(trie_builder.build());
 }
 
@@ -83,7 +90,8 @@ impl Plugin for ConsolePlugin {
         #[cfg(feature = "default-commands")]
         app.add_console_command::<ClearCommand, _>(clear_command)
             .add_console_command::<ExitCommand, _>(exit_command)
-            .add_console_command::<HelpCommand, _>(help_command);
+            .add_console_command::<HelpCommand, _>(help_command)
+            .add_console_command::<ListCommand, _>(list_command);
 
         // after per-command startup
         app.add_systems(Startup, init.after(ConsoleSet::Startup))
