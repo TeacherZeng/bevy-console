@@ -1,30 +1,35 @@
 #![doc = include_str ! ("../README.md")]
 #![deny(missing_docs)]
 
+#[cfg(feature = "command-clear")]
+use crate::commands::clear::{ClearCommand, clear_command};
+#[cfg(feature = "command-exit")]
+use crate::commands::exit::{ExitCommand, exit_command};
+#[cfg(feature = "command-help")]
+use crate::commands::help::{HelpCommand, help_command};
+#[cfg(feature = "command-list")]
+use crate::commands::help::{ListCommand, list_command};
+pub use crate::console::{
+    AddConsoleCommand, Command, ConsoleCommand, ConsoleCommandEntered, ConsoleConfiguration,
+    ConsoleOpen, NamedCommand, PrintConsoleLine,
+};
+pub use crate::log::*;
 use bevy::prelude::*;
 pub use bevy_console_derive::ConsoleCommand;
 use bevy_egui::{EguiPlugin, EguiPreUpdateSet, EguiPrimaryContextPass};
 use console::{ConsoleCache, block_keyboard_input, block_mouse_input};
 use trie_rs::TrieBuilder;
 
-#[cfg(feature = "default-commands")]
-use crate::commands::{
-    clear::{ClearCommand, clear_command},
-    exit::{ExitCommand, exit_command},
-    help::{HelpCommand, ListCommand, help_command, list_command},
-};
-
-pub use crate::console::{
-    AddConsoleCommand, Command, ConsoleCommand, ConsoleCommandEntered, ConsoleConfiguration,
-    ConsoleOpen, NamedCommand, PrintConsoleLine,
-};
-pub use crate::log::*;
-
 use crate::console::{ConsoleState, console_ui, receive_console_line};
 pub use clap;
 
 mod color;
-#[cfg(feature = "default-commands")]
+#[cfg(any(
+    feature = "command-clear",
+    feature = "command-exit",
+    feature = "command-help",
+    feature = "command-list"
+))]
 mod commands;
 mod console;
 mod log;
@@ -87,11 +92,14 @@ impl Plugin for ConsolePlugin {
             .add_message::<ConsoleCommandEntered>()
             .add_message::<PrintConsoleLine>();
 
-        #[cfg(feature = "default-commands")]
-        app.add_console_command::<ClearCommand, _>(clear_command)
-            .add_console_command::<ExitCommand, _>(exit_command)
-            .add_console_command::<HelpCommand, _>(help_command)
-            .add_console_command::<ListCommand, _>(list_command);
+        #[cfg(feature = "command-clear")]
+        app.add_console_command::<ClearCommand, _>(clear_command);
+        #[cfg(feature = "command-exit")]
+        app.add_console_command::<ExitCommand, _>(exit_command);
+        #[cfg(feature = "command-help")]
+        app.add_console_command::<HelpCommand, _>(help_command);
+        #[cfg(feature = "command-list")]
+        app.add_console_command::<ListCommand, _>(list_command);
 
         // after per-command startup
         app.add_systems(Startup, init.after(ConsoleSet::Startup))

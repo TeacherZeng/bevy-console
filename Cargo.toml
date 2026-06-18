@@ -36,4 +36,13 @@ members = ["bevy_console_derive"]
 
 [features]
 default = ["default-commands"]
-default-commands = []
+default-commands = [
+  "command-clear",
+  "command-exit",
+  "command-help",
+  "command-list",
+]
+command-clear = []
+command-exit = []
+command-help = []
+command-list = []
