@@ -604,11 +604,12 @@ pub(crate) fn recompute_predictions(
         cache.prediction_matches_buffer = false;
         state.suggestion_index = None;
 
-        if let Some(first) = cache.predictions_cache.first()
-            && cache.predictions_cache.len() == 1
-            && first == &state.buf
+        if cache
+            .predictions_cache
+            .iter()
+            .any(|candidate| candidate == &state.buf)
         {
-            cache.prediction_matches_buffer = true
+            cache.prediction_matches_buffer = true;
         } else if !cache.predictions_cache.is_empty() {
             state.suggestion_index = Some(0);
         }
@@ -1178,6 +1179,29 @@ mod tests {
 
         assert!(cache.prediction_matches_buffer);
         assert_eq!(state.suggestion_index, None);
+    }
+
+    #[test]
+    fn recompute_predictions_hides_popup_for_exact_alias_with_longer_canonical_match() {
+        let mut state = ConsoleState {
+            buf: "grid".to_string(),
+            ..Default::default()
+        };
+        let mut cache = ConsoleCache {
+            completion_entries: vec!["grid".to_string(), "debug.grid".to_string()],
+            ..Default::default()
+        };
+
+        recompute_predictions(&mut state, &mut cache, 8);
+
+        assert_eq!(
+            cache.predictions_cache,
+            vec!["grid".to_string(), "debug.grid".to_string()]
+        );
+        assert!(cache.prediction_matches_buffer);
+        assert_eq!(state.suggestion_index, None);
+        assert!(!should_show_suggestions_popup(true, &state, &cache));
+        assert!(!accept_selected_suggestion(&mut state, &mut cache));
     }
 
     #[test]
