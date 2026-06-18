@@ -6,6 +6,7 @@ use crate as bevy_console;
 use crate::{ConsoleCommand, ConsoleConfiguration, reply};
 
 /// Prints available arguments and usage
+#[cfg(feature = "command-help")]
 #[derive(Parser, ConsoleCommand)]
 #[command(name = "help")]
 pub(crate) struct HelpCommand {
@@ -14,6 +15,7 @@ pub(crate) struct HelpCommand {
 }
 
 /// Lists available commands, optionally filtered by a fuzzy query
+#[cfg(feature = "command-list")]
 #[derive(Parser, ConsoleCommand)]
 #[command(name = "list")]
 pub(crate) struct ListCommand {
@@ -21,6 +23,7 @@ pub(crate) struct ListCommand {
     query: Option<String>,
 }
 
+#[cfg(feature = "command-help")]
 pub(crate) fn help_command(
     mut help: ConsoleCommand<HelpCommand>,
     mut config: ResMut<ConsoleConfiguration>,
@@ -56,6 +59,7 @@ pub(crate) fn help_command(
     }
 }
 
+#[cfg(feature = "command-list")]
 pub(crate) fn list_command(
     mut list: ConsoleCommand<ListCommand>,
     config: Res<ConsoleConfiguration>,

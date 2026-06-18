@@ -326,14 +326,14 @@ impl Clone for ConsoleConfiguration {
             history_size: self.history_size,
             symbol: self.symbol.clone(),
             arg_completions: self.arg_completions.clone(),
-            collapsible: false,
-            title_name: "Console".to_string(),
-            resizable: true,
-            moveable: true,
-            show_title_bar: true,
-            background_color: Color32::from_black_alpha(102),
-            foreground_color: Color32::LIGHT_GRAY,
-            num_suggestions: 4,
+            collapsible: self.collapsible,
+            title_name: self.title_name.clone(),
+            resizable: self.resizable,
+            moveable: self.moveable,
+            show_title_bar: self.show_title_bar,
+            background_color: self.background_color,
+            foreground_color: self.foreground_color,
+            num_suggestions: self.num_suggestions,
             suggestion_background_color: self.suggestion_background_color,
             suggestion_border_color: self.suggestion_border_color,
             suggestion_selected_background_color: self.suggestion_selected_background_color,
@@ -549,6 +549,17 @@ fn handle_tab_completion(state: &mut ConsoleState, cache: &ConsoleCache) -> bool
     false
 }
 
+fn should_show_suggestions_popup(
+    has_focus: bool,
+    state: &ConsoleState,
+    cache: &ConsoleCache,
+) -> bool {
+    has_focus
+        && !state.buf.is_empty()
+        && !cache.prediction_matches_buffer
+        && !cache.predictions_cache.is_empty()
+}
+
 /// Recompute predictions for the console based on the current buffer content.
 /// if the buffer does not change the predictions are not recomputed.
 pub(crate) fn recompute_predictions(
@@ -716,9 +727,7 @@ pub(crate) fn console_ui(
                     }
 
                     // Suggestions popup
-                    if text_edit_response.has_focus()
-                        && !state.buf.is_empty()
-                        && !cache.prediction_matches_buffer
+                    if should_show_suggestions_popup(text_edit_response.has_focus(), &state, &cache)
                     {
                         let suggestions_area = egui::Area::new(ui.auto_id_with("suggestions"))
                             .fixed_pos(text_edit_response.rect.left_bottom())
@@ -1076,8 +1085,22 @@ mod tests {
     }
 
     #[test]
-    fn console_configuration_clone_preserves_suggestion_popup_style() {
+    fn console_configuration_clone_preserves_configuration_fields() {
         let config = ConsoleConfiguration {
+            left_pos: 23.0,
+            top_pos: 45.0,
+            height: 321.0,
+            width: 654.0,
+            history_size: 73,
+            symbol: "$ ".to_string(),
+            collapsible: false,
+            title_name: "Farmer Console".to_string(),
+            resizable: false,
+            moveable: false,
+            show_title_bar: false,
+            background_color: Color32::from_black_alpha(180),
+            foreground_color: Color32::YELLOW,
+            num_suggestions: 9,
             suggestion_background_color: Color32::from_black_alpha(240),
             suggestion_border_color: Color32::from_gray(120),
             suggestion_selected_background_color: Color32::from_rgb(32, 64, 96),
@@ -1086,6 +1109,20 @@ mod tests {
 
         let cloned = config.clone();
 
+        assert_eq!(cloned.left_pos, config.left_pos);
+        assert_eq!(cloned.top_pos, config.top_pos);
+        assert_eq!(cloned.height, config.height);
+        assert_eq!(cloned.width, config.width);
+        assert_eq!(cloned.history_size, config.history_size);
+        assert_eq!(cloned.symbol, config.symbol);
+        assert_eq!(cloned.collapsible, config.collapsible);
+        assert_eq!(cloned.title_name, config.title_name);
+        assert_eq!(cloned.resizable, config.resizable);
+        assert_eq!(cloned.moveable, config.moveable);
+        assert_eq!(cloned.show_title_bar, config.show_title_bar);
+        assert_eq!(cloned.background_color, config.background_color);
+        assert_eq!(cloned.foreground_color, config.foreground_color);
+        assert_eq!(cloned.num_suggestions, config.num_suggestions);
         assert_eq!(
             cloned.suggestion_background_color,
             config.suggestion_background_color
@@ -1098,5 +1135,20 @@ mod tests {
             cloned.suggestion_selected_background_color,
             config.suggestion_selected_background_color
         );
+    }
+
+    #[test]
+    fn suggestions_popup_is_hidden_without_predictions() {
+        let state = ConsoleState {
+            buf: "scene.load --x 1".to_string(),
+            ..Default::default()
+        };
+        let cache = ConsoleCache {
+            predictions_cache: Vec::new(),
+            prediction_matches_buffer: false,
+            ..Default::default()
+        };
+
+        assert!(!should_show_suggestions_popup(true, &state, &cache));
     }
 }
