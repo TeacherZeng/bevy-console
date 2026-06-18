@@ -516,37 +516,47 @@ fn fuzzy_match_position(query_lower: &str, candidate_lower: &str) -> Option<usiz
     first_match
 }
 
-fn accept_selected_suggestion(state: &mut ConsoleState, cache: &ConsoleCache) -> bool {
-    let Some(index) = state.suggestion_index else {
-        return false;
-    };
-
-    if index >= cache.predictions_cache.len() || cache.prediction_matches_buffer {
-        return false;
-    }
-
-    state.buf = cache.predictions_cache[index].clone();
+fn clear_prediction_popup(state: &mut ConsoleState, cache: &mut ConsoleCache) {
+    cache.predictions_cache.clear();
+    cache.predictions_hash_key = None;
+    cache.prediction_matches_buffer = false;
     state.suggestion_index = None;
-    true
 }
 
-fn handle_tab_completion(state: &mut ConsoleState, cache: &ConsoleCache) -> bool {
+fn accept_selected_suggestion(state: &mut ConsoleState, cache: &mut ConsoleCache) -> bool {
     if cache.predictions_cache.is_empty() || cache.prediction_matches_buffer {
         state.suggestion_index = None;
         return false;
     }
 
-    if cache.predictions_cache.len() == 1 {
-        state.buf = cache.predictions_cache[0].clone();
+    let index = state
+        .suggestion_index
+        .unwrap_or(0)
+        .min(cache.predictions_cache.len() - 1);
+    state.buf = cache.predictions_cache[index].clone();
+    clear_prediction_popup(state, cache);
+    true
+}
+
+fn move_suggestion_selection(
+    state: &mut ConsoleState,
+    cache: &ConsoleCache,
+    direction: isize,
+) -> bool {
+    if cache.predictions_cache.is_empty() || cache.prediction_matches_buffer {
         state.suggestion_index = None;
-        return true;
+        return false;
     }
 
-    state.suggestion_index = Some(match state.suggestion_index {
-        Some(index) => (index + 1) % cache.predictions_cache.len(),
-        None => 0,
-    });
-    false
+    let len = cache.predictions_cache.len();
+    let current = state.suggestion_index.unwrap_or(0) as isize;
+    let next = (current + direction).rem_euclid(len as isize) as usize;
+    state.suggestion_index = Some(next);
+    true
+}
+
+fn handle_tab_completion(state: &mut ConsoleState, cache: &mut ConsoleCache) -> bool {
+    accept_selected_suggestion(state, cache)
 }
 
 fn should_show_suggestions_popup(
@@ -591,14 +601,16 @@ pub(crate) fn recompute_predictions(
             completion_candidates(&query, &cache.completion_entries, suggestion_count);
 
         cache.predictions_hash_key = Some(hash);
-        state.suggestion_index = None;
         cache.prediction_matches_buffer = false;
+        state.suggestion_index = None;
 
         if let Some(first) = cache.predictions_cache.first()
             && cache.predictions_cache.len() == 1
             && first == &state.buf
         {
             cache.prediction_matches_buffer = true
+        } else if !cache.predictions_cache.is_empty() {
+            state.suggestion_index = Some(0);
         }
     }
 }
@@ -685,15 +697,31 @@ pub(crate) fn console_ui(
                     // Handle enter
                     handle_enter(
                         &config,
-                        &cache,
+                        &mut cache,
                         &mut state,
                         command_entered,
                         ui,
                         &text_edit_response,
                     );
 
-                    // History navigation
+                    let suggestions_popup_visible = should_show_suggestions_popup(
+                        text_edit_response.has_focus(),
+                        &state,
+                        &cache,
+                    );
+
+                    // Suggestion and history navigation
                     if text_edit_response.has_focus()
+                        && suggestions_popup_visible
+                        && ui.input(|i| i.key_pressed(egui::Key::ArrowDown))
+                    {
+                        move_suggestion_selection(&mut state, &cache, 1);
+                    } else if text_edit_response.has_focus()
+                        && suggestions_popup_visible
+                        && ui.input(|i| i.key_pressed(egui::Key::ArrowUp))
+                    {
+                        move_suggestion_selection(&mut state, &cache, -1);
+                    } else if text_edit_response.has_focus()
                         && ui.input(|i| i.key_pressed(egui::Key::ArrowUp))
                         && state.history.len() > 1
                         && state.history_index < state.history.len() - 1
@@ -714,10 +742,17 @@ pub(crate) fn console_ui(
                         set_cursor_pos(ui.ctx(), text_edit_response.id, state.buf.len());
                     }
 
-                    // Tab completes a single suggestion or cycles multiple suggestions
-                    if ui.input(|i| i.key_pressed(egui::Key::Tab))
-                        && handle_tab_completion(&mut state, &cache)
+                    // Shift+Tab navigates suggestions, Tab accepts the highlighted suggestion
+                    if text_edit_response.has_focus()
+                        && suggestions_popup_visible
+                        && ui.input(|i| i.modifiers.shift && i.key_pressed(egui::Key::Tab))
                     {
+                        move_suggestion_selection(&mut state, &cache, -1);
+                    } else if text_edit_response.has_focus()
+                        && ui.input(|i| i.key_pressed(egui::Key::Tab))
+                        && handle_tab_completion(&mut state, &mut cache)
+                    {
+                        ui.memory_mut(|m| m.request_focus(text_edit_response.id));
                         set_cursor_pos(ui.ctx(), text_edit_response.id, state.buf.len());
                     }
 
@@ -792,7 +827,7 @@ pub(crate) fn console_ui(
 
 fn handle_enter(
     config: &Res<'_, ConsoleConfiguration>,
-    cache: &ResMut<'_, ConsoleCache>,
+    cache: &mut ResMut<'_, ConsoleCache>,
     state: &mut ResMut<'_, ConsoleState>,
     mut command_entered: MessageWriter<'_, ConsoleCommandEntered>,
     ui: &mut egui::Ui,
@@ -801,6 +836,7 @@ fn handle_enter(
     // Handle enter
     if text_edit_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
         if accept_selected_suggestion(state, cache) {
+            ui.memory_mut(|m| m.request_focus(text_edit_response.id));
             set_cursor_pos(ui.ctx(), text_edit_response.id, state.buf.len());
             return;
         }
@@ -839,6 +875,10 @@ fn handle_enter(
 
             state.buf.clear();
         }
+
+        clear_prediction_popup(state, cache);
+        ui.memory_mut(|m| m.request_focus(text_edit_response.id));
+        set_cursor_pos(ui.ctx(), text_edit_response.id, state.buf.len());
     }
 }
 
@@ -1030,38 +1070,55 @@ mod tests {
             buf: "debug.sc".to_string(),
             ..Default::default()
         };
-        let cache = ConsoleCache {
+        let mut cache = ConsoleCache {
             predictions_cache: vec!["debug.scene.load".to_string()],
             prediction_matches_buffer: false,
             ..Default::default()
         };
 
-        let accepted = handle_tab_completion(&mut state, &cache);
+        let accepted = handle_tab_completion(&mut state, &mut cache);
 
         assert!(accepted);
         assert_eq!(state.buf, "debug.scene.load");
         assert_eq!(state.suggestion_index, None);
+        assert!(cache.predictions_cache.is_empty());
     }
 
     #[test]
-    fn tab_completion_cycles_multiple_candidates_without_replacing_input() {
+    fn tab_completion_accepts_top_candidate_when_multiple_match() {
         let mut state = ConsoleState {
             buf: "scene".to_string(),
             ..Default::default()
         };
-        let cache = ConsoleCache {
+        let mut cache = ConsoleCache {
             predictions_cache: vec!["scene.inspect".to_string(), "debug.scene.load".to_string()],
             prediction_matches_buffer: false,
             ..Default::default()
         };
 
-        assert!(!handle_tab_completion(&mut state, &cache));
-        assert_eq!(state.buf, "scene");
-        assert_eq!(state.suggestion_index, Some(0));
+        assert!(handle_tab_completion(&mut state, &mut cache));
+        assert_eq!(state.buf, "scene.inspect");
+        assert_eq!(state.suggestion_index, None);
+        assert!(cache.predictions_cache.is_empty());
+    }
 
-        assert!(!handle_tab_completion(&mut state, &cache));
-        assert_eq!(state.buf, "scene");
-        assert_eq!(state.suggestion_index, Some(1));
+    #[test]
+    fn tab_completion_accepts_currently_selected_candidate() {
+        let mut state = ConsoleState {
+            buf: "scene".to_string(),
+            suggestion_index: Some(1),
+            ..Default::default()
+        };
+        let mut cache = ConsoleCache {
+            predictions_cache: vec!["scene.inspect".to_string(), "debug.scene.load".to_string()],
+            prediction_matches_buffer: false,
+            ..Default::default()
+        };
+
+        assert!(handle_tab_completion(&mut state, &mut cache));
+        assert_eq!(state.buf, "debug.scene.load");
+        assert_eq!(state.suggestion_index, None);
+        assert!(cache.predictions_cache.is_empty());
     }
 
     #[test]
@@ -1071,16 +1128,99 @@ mod tests {
             suggestion_index: Some(1),
             ..Default::default()
         };
-        let cache = ConsoleCache {
+        let mut cache = ConsoleCache {
             predictions_cache: vec!["scene.inspect".to_string(), "debug.scene.load".to_string()],
             prediction_matches_buffer: false,
             ..Default::default()
         };
 
-        let accepted = accept_selected_suggestion(&mut state, &cache);
+        let accepted = accept_selected_suggestion(&mut state, &mut cache);
 
         assert!(accepted);
         assert_eq!(state.buf, "debug.scene.load");
+        assert_eq!(state.suggestion_index, None);
+        assert!(cache.predictions_cache.is_empty());
+    }
+
+    #[test]
+    fn recompute_predictions_selects_top_candidate_by_default() {
+        let mut state = ConsoleState {
+            buf: "scene".to_string(),
+            ..Default::default()
+        };
+        let mut cache = ConsoleCache {
+            completion_entries: vec!["scene.inspect".to_string(), "debug.scene.load".to_string()],
+            ..Default::default()
+        };
+
+        recompute_predictions(&mut state, &mut cache, 8);
+
+        assert_eq!(
+            cache.predictions_cache,
+            vec!["scene.inspect".to_string(), "debug.scene.load".to_string()]
+        );
+        assert!(!cache.prediction_matches_buffer);
+        assert_eq!(state.suggestion_index, Some(0));
+    }
+
+    #[test]
+    fn recompute_predictions_does_not_select_exact_command_match() {
+        let mut state = ConsoleState {
+            buf: "scene.inspect".to_string(),
+            ..Default::default()
+        };
+        let mut cache = ConsoleCache {
+            completion_entries: vec!["scene.inspect".to_string()],
+            ..Default::default()
+        };
+
+        recompute_predictions(&mut state, &mut cache, 8);
+
+        assert!(cache.prediction_matches_buffer);
+        assert_eq!(state.suggestion_index, None);
+    }
+
+    #[test]
+    fn suggestion_selection_moves_with_wraparound() {
+        let mut state = ConsoleState {
+            buf: "scene".to_string(),
+            suggestion_index: Some(0),
+            ..Default::default()
+        };
+        let cache = ConsoleCache {
+            predictions_cache: vec![
+                "scene.inspect".to_string(),
+                "scene.load".to_string(),
+                "scene.reload".to_string(),
+            ],
+            prediction_matches_buffer: false,
+            ..Default::default()
+        };
+
+        assert!(move_suggestion_selection(&mut state, &cache, 1));
+        assert_eq!(state.suggestion_index, Some(1));
+
+        assert!(move_suggestion_selection(&mut state, &cache, -1));
+        assert_eq!(state.suggestion_index, Some(0));
+
+        assert!(move_suggestion_selection(&mut state, &cache, -1));
+        assert_eq!(state.suggestion_index, Some(2));
+    }
+
+    #[test]
+    fn suggestion_selection_is_disabled_for_exact_match() {
+        let mut state = ConsoleState {
+            buf: "scene.inspect".to_string(),
+            suggestion_index: Some(0),
+            ..Default::default()
+        };
+        let cache = ConsoleCache {
+            predictions_cache: vec!["scene.inspect".to_string()],
+            prediction_matches_buffer: true,
+            ..Default::default()
+        };
+
+        assert!(!move_suggestion_selection(&mut state, &cache, 1));
         assert_eq!(state.suggestion_index, None);
     }
 
